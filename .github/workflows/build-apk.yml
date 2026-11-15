@@ -1,0 +1,122 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Loyiha ZIP faylini ochish
+        run: |
+          set -e
+          Z=$(ls history_duo_project*.zip 2>/dev/null | head -n1)
+          test -n "$Z" || { echo "XATO: repoda history_duo_project.zip topilmadi"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/src"
+          unzip -q -o "$Z" -d "$RUNNER_TEMP/src"
+          P=$(find "$RUNNER_TEMP/src" -name pubspec.yaml -not -path '*/.*' | head -n1)
+          test -n "$P" || { echo "XATO: ZIP ichida pubspec.yaml yo'q"; exit 1; }
+          echo "SRC=$(dirname "$P")" >> "$GITHUB_ENV"
+
+      - name: Firebase sozlamalarini o'qish
+        env:
+          GSJ: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          set -e
+          if [ -z "$GSJ" ]; then
+            echo "XATO: GOOGLE_SERVICES_JSON secret kiritilmagan (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          echo "$GSJ" > "$RUNNER_TEMP/gs.json"
+          K=$(jq -r '.client[0].api_key[0].current_key' "$RUNNER_TEMP/gs.json")
+          A=$(jq -r '.client[0].client_info.mobilesdk_app_id' "$RUNNER_TEMP/gs.json")
+          S=$(jq -r '.project_info.project_number' "$RUNNER_TEMP/gs.json")
+          I=$(jq -r '.project_info.project_id' "$RUNNER_TEMP/gs.json")
+          PK=$(jq -r '.client[0].client_info.android_client_info.package_name' "$RUNNER_TEMP/gs.json")
+          for v in "$K" "$A" "$S" "$I"; do
+            if [ -z "$v" ] || [ "$v" = "null" ]; then echo "XATO: google-services.json to'liq emas"; exit 1; fi
+          done
+          echo "Firebase loyiha: $I | package: $PK"
+          if [ "$PK" != "uz.historyduo.history_duo" ]; then
+            echo "OGOHLANTIRISH: Firebase'dagi package nomi uz.historyduo.history_duo emas"
+          fi
+          echo "::add-mask::$K"
+          echo "::add-mask::$A"
+          {
+            echo "FB_KEY=$K"
+            echo "FB_APP=$A"
+            echo "FB_SENDER=$S"
+            echo "FB_PROJECT=$I"
+          } >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter Android loyihasini yaratish
+        run: |
+          set -e
+          mkdir -p "$RUNNER_TEMP/app"
+          cd "$RUNNER_TEMP/app"
+          flutter create --org uz.historyduo --project-name history_duo --platforms=android .
+          rm -rf lib test assets
+          cp -r "$SRC/lib" lib
+          cp -r "$SRC/assets" assets
+          cp "$SRC/pubspec.yaml" pubspec.yaml
+          python3 "$SRC/ci/patch_android.py" .
+          flutter pub get
+
+      - name: Kodni tahlil qilish (ma'lumot uchun)
+        working-directory: ${{ runner.temp }}/app
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: APK yig'ish
+        working-directory: ${{ runner.temp }}/app
+        env:
+          METERED_APP: ${{ secrets.METERED_APP }}
+          METERED_KEY: ${{ secrets.METERED_KEY }}
+          TURN_URL: ${{ secrets.TURN_URL }}
+          TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
+          TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
+        run: |
+          flutter build apk --release --no-shrink \
+            --dart-define=FIREBASE_API_KEY="$FB_KEY" \
+            --dart-define=FIREBASE_APP_ID="$FB_APP" \
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FB_SENDER" \
+            --dart-define=FIREBASE_PROJECT_ID="$FB_PROJECT" \
+            --dart-define=METERED_APP="$METERED_APP" \
+            --dart-define=METERED_KEY="$METERED_KEY" \
+            --dart-define=TURN_URL="$TURN_URL" \
+            --dart-define=TURN_USERNAME="$TURN_USERNAME" \
+            --dart-define=TURN_CREDENTIAL="$TURN_CREDENTIAL"
+          cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/HistoryDuo.apk"
+          ls -la "$GITHUB_WORKSPACE/HistoryDuo.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HistoryDuo-apk
+          path: HistoryDuo.apk
+
+      - name: Telefonga yuklab olish uchun Release yaratish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "apk-${{ github.run_number }}" HistoryDuo.apk \
+            --title "HISTORY DUO APK #${{ github.run_number }}" \
+            --notes "Telefonda HistoryDuo.apk ni bosib yuklab oling va o'rnating." \
+            --latest
+            
