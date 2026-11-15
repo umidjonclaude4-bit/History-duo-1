@@ -84,6 +84,24 @@ jobs:
         working-directory: ${{ runner.temp }}/app
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
+      - name: Kutubxonalar uchun compileSdk tuzatish
+        run: |
+          mkdir -p "$HOME/.gradle/init.d"
+          cat > "$HOME/.gradle/init.d/fix-compile-sdk.gradle" <<'EOF'
+          allprojects {
+              afterEvaluate { p ->
+                  def ext = p.extensions.findByName('android')
+                  if (ext != null && p.name != 'app') {
+                      try {
+                          ext.compileSdk = 36
+                      } catch (Throwable t) {
+                          try { ext.compileSdkVersion(36) } catch (Throwable t2) { println "compileSdk o'rnatilmadi: " + p.name }
+                      }
+                  }
+              }
+          }
+          EOF
+
       - name: APK yig'ish
         working-directory: ${{ runner.temp }}/app
         env:
