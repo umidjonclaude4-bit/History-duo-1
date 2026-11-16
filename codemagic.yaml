@@ -1,0 +1,108 @@
+workflows:
+  history-duo-debug:
+    name: HISTORY DUO - sinov APK
+    max_build_duration: 45
+    instance_type: linux_x2
+    environment:
+      flutter: stable
+    scripts:
+      - name: Flutter Android loyihasini yaratish
+        script: |
+          flutter create --org uz.historyduo --project-name history_duo .
+          rm -rf lib test assets
+          cp -r app_src/lib lib
+          cp -r app_src/assets assets
+          cp app_src/pubspec.yaml pubspec.yaml
+          flutter pub get
+      - name: Yangilanish fayllarini joylash (agar bor bo'lsa)
+        script: |
+          for f in tarix6.json uztarix7.json jahon7.json; do
+            if [ -f "$f" ]; then cp "$f" assets/books/; fi
+          done
+          if [ -f book_service.dart ]; then cp book_service.dart lib/services/; fi
+          if [ -f firebase_options.dart ]; then cp firebase_options.dart lib/; fi
+          ls assets/books
+      - name: Android ruxsatlari va ilova nomi
+        script: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#android:label="history_duo"#android:label="HISTORY DUO"#' "$M"
+          sed -i 's#<manifest #<manifest xmlns:tools="http://schemas.android.com/tools" #' "$M"
+          PERMS='<uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>\n    <uses-permission android:name="android.permission.RECORD_AUDIO"/>\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>\n    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>\n    <uses-permission android:name="android.permission.CAMERA" tools:node="remove"/>'
+          sed -i "s#<application#${PERMS}\n    <application#" "$M"
+      - name: minSdk 23 ga o'rnatish (Firebase Auth talabi)
+        script: |
+          G=$(ls android/app/build.gradle.kts android/app/build.gradle 2>/dev/null | head -1)
+          sed -i -E 's/minSdk(Version)? *(=)? *(flutter\.minSdkVersion|[0-9]+)/minSdk\1 \2 23/' "$G"
+          grep -n minSdk "$G"
+      - name: APK debug yig'ish
+        script: |
+          flutter build apk --debug \
+            --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
+            --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
+            --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" \
+            --dart-define=METERED_APP="$METERED_APP" \
+            --dart-define=METERED_KEY="$METERED_KEY" \
+            --dart-define=TURN_URL="$TURN_URL" \
+            --dart-define=TURN_USERNAME="$TURN_USERNAME" \
+            --dart-define=TURN_CREDENTIAL="$TURN_CREDENTIAL"
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk
+
+  history-duo-release-aab:
+    name: HISTORY DUO - Android AAB
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      flutter: stable
+      # Codemagic UI'da FIREBASE_* va kerak bo'lsa TURN_* environment
+      # variables sifatida kiriting. Maxfiy TURN kalitlarini repoga yozmang.
+    scripts:
+      - name: Flutter loyihasini tayyorlash
+        script: |
+          flutter create --org uz.historyduo --project-name history_duo .
+          rm -rf lib test assets
+          cp -r app_src/lib lib
+          cp -r app_src/assets assets
+          cp app_src/pubspec.yaml pubspec.yaml
+          flutter pub get
+      - name: Yangilanish fayllarini joylash (agar bor bo'lsa)
+        script: |
+          for f in tarix6.json uztarix7.json jahon7.json; do
+            if [ -f "$f" ]; then cp "$f" assets/books/; fi
+          done
+          if [ -f book_service.dart ]; then cp book_service.dart lib/services/; fi
+          if [ -f firebase_options.dart ]; then cp firebase_options.dart lib/; fi
+          ls assets/books
+      - name: Android manifest sozlamalari
+        script: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#android:label="history_duo"#android:label="HISTORY DUO"#' "$M"
+          sed -i 's#<manifest #<manifest xmlns:tools="http://schemas.android.com/tools" #' "$M"
+          PERMS='<uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>\n    <uses-permission android:name="android.permission.RECORD_AUDIO"/>\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>\n    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>\n    <uses-permission android:name="android.permission.CAMERA" tools:node="remove"/>'
+          sed -i "s#<application#${PERMS}\n    <application#" "$M"
+      - name: minSdk 23 ga o'rnatish (Firebase Auth talabi)
+        script: |
+          G=$(ls android/app/build.gradle.kts android/app/build.gradle 2>/dev/null | head -1)
+          sed -i -E 's/minSdk(Version)? *(=)? *(flutter\.minSdkVersion|[0-9]+)/minSdk\1 \2 23/' "$G"
+          grep -n minSdk "$G"
+      - name: Firebase sozlamalari tekshiruvi
+        script: |
+          test -n "$FIREBASE_API_KEY" || (echo 'FIREBASE_API_KEY kiritilmagan' && exit 1)
+          test -n "$FIREBASE_APP_ID" || (echo 'FIREBASE_APP_ID kiritilmagan' && exit 1)
+          test -n "$FIREBASE_MESSAGING_SENDER_ID" || (echo 'FIREBASE_MESSAGING_SENDER_ID kiritilmagan' && exit 1)
+          test -n "$FIREBASE_PROJECT_ID" || (echo 'FIREBASE_PROJECT_ID kiritilmagan' && exit 1)
+      - name: Release AAB yig'ish
+        script: |
+          flutter build appbundle --release \
+            --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
+            --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
+            --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" \
+            --dart-define=METERED_APP="$METERED_APP" \
+            --dart-define=METERED_KEY="$METERED_KEY" \
+            --dart-define=TURN_URL="$TURN_URL" \
+            --dart-define=TURN_USERNAME="$TURN_USERNAME" \
+            --dart-define=TURN_CREDENTIAL="$TURN_CREDENTIAL"
+    artifacts:
+      - build/app/outputs/bundle/release/*.aab
